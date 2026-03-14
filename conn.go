@@ -108,6 +108,7 @@ func NewConn(opts *Options) (*Conn, error) {
 		SetSubsystem:  sys.Set,
 		HealthTracker: health.NewTracker(bus),
 		Metrics:       new(usermetric.Registry),
+		EventBus:      bus,
 	})
 	if err != nil {
 		netMon.Close()
