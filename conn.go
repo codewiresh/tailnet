@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"tailscale.com/health"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/netmon"
 	"tailscale.com/net/netns"
@@ -102,10 +103,11 @@ func NewConn(opts *Options) (*Conn, error) {
 	sys := new(tsd.System)
 
 	engine, err := wgengine.NewUserspaceEngine(logf, wgengine.Config{
-		NetMon:       netMon,
-		Dialer:       dialer,
-		SetSubsystem: sys.Set,
-		Metrics:      new(usermetric.Registry),
+		NetMon:        netMon,
+		Dialer:        dialer,
+		SetSubsystem:  sys.Set,
+		HealthTracker: health.NewTracker(bus),
+		Metrics:       new(usermetric.Registry),
 	})
 	if err != nil {
 		netMon.Close()
