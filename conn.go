@@ -93,9 +93,12 @@ func NewConn(opts *Options) (*Conn, error) {
 
 	sys := tsd.NewSystem()
 
+	// Try full netmon; fall back to static snapshot in restricted environments
+	// (e.g. isol8 seccomp blocks netlinkrib).
 	netMon, err := netmon.New(sys.Bus.Get(), logf)
 	if err != nil {
-		return nil, fmt.Errorf("netmon: %w", err)
+		opts.Logger.Warn("netmon unavailable, using static snapshot", "error", err)
+		netMon = netmon.NewStatic()
 	}
 
 	dialer := &tsdial.Dialer{Logf: logf}
