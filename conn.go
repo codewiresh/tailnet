@@ -12,19 +12,18 @@ import (
 
 	"github.com/google/uuid"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-	"tailscale.com/health"
+	"tailscale.com/ipn/ipnlocal"
+	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/netmon"
 	"tailscale.com/net/netns"
 	"tailscale.com/net/tsdial"
-	"tailscale.com/proxymap"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsd"
 	"tailscale.com/types/key"
 	tslogger "tailscale.com/types/logger"
+	"tailscale.com/types/logid"
 	"tailscale.com/types/netmap"
-	"tailscale.com/util/eventbus"
-	"tailscale.com/util/usermetric"
 	"tailscale.com/wgengine"
 	"tailscale.com/wgengine/magicsock"
 	"tailscale.com/wgengine/netstack"
@@ -57,7 +56,7 @@ type Conn struct {
 	logger    *slog.Logger
 
 	sys       *tsd.System
-	bus       *eventbus.Bus
+	lb        *ipnlocal.LocalBackend
 	engine    wgengine.Engine
 	magicConn *magicsock.Conn
 	netStack  *netstack.Impl
@@ -92,23 +91,22 @@ func NewConn(opts *Options) (*Conn, error) {
 		opts.Logger.Debug(fmt.Sprintf(format, args...))
 	})
 
-	bus := eventbus.New()
+	sys := tsd.NewSystem()
 
-	netMon, err := netmon.New(bus, logf)
+	netMon, err := netmon.New(sys.Bus.Get(), logf)
 	if err != nil {
 		return nil, fmt.Errorf("netmon: %w", err)
 	}
 
 	dialer := &tsdial.Dialer{Logf: logf}
-	sys := new(tsd.System)
 
 	engine, err := wgengine.NewUserspaceEngine(logf, wgengine.Config{
 		NetMon:        netMon,
 		Dialer:        dialer,
 		SetSubsystem:  sys.Set,
-		HealthTracker: health.NewTracker(bus),
-		Metrics:       new(usermetric.Registry),
-		EventBus:      bus,
+		HealthTracker: sys.HealthTracker.Get(),
+		Metrics:       sys.UserMetricsRegistry(),
+		EventBus:      sys.Bus.Get(),
 	})
 	if err != nil {
 		netMon.Close()
@@ -117,6 +115,7 @@ func NewConn(opts *Options) (*Conn, error) {
 
 	engine = wgengine.NewWatchdog(engine)
 	sys.Set(engine)
+	sys.Set(new(mem.Store))
 
 	mc := sys.MagicSock.Get()
 	if err := mc.SetPrivateKey(nodePrivKey); err != nil {
@@ -130,6 +129,13 @@ func NewConn(opts *Options) (*Conn, error) {
 		return ok
 	}
 
+	lb, err := ipnlocal.NewLocalBackend(logf, logid.PublicID{}, sys, 0)
+	if err != nil {
+		engine.Close()
+		netMon.Close()
+		return nil, fmt.Errorf("local backend: %w", err)
+	}
+
 	ns, err := netstack.Create(
 		logf,
 		sys.Tun.Get(),
@@ -137,9 +143,10 @@ func NewConn(opts *Options) (*Conn, error) {
 		mc,
 		dialer,
 		sys.DNSManager.Get(),
-		new(proxymap.Mapper),
+		sys.ProxyMapper(),
 	)
 	if err != nil {
+		lb.Shutdown()
 		engine.Close()
 		netMon.Close()
 		return nil, fmt.Errorf("netstack: %w", err)
@@ -150,7 +157,8 @@ func NewConn(opts *Options) (*Conn, error) {
 	}
 	ns.ProcessLocalIPs = true
 
-	if err := ns.Start(nil); err != nil {
+	if err := ns.Start(lb); err != nil {
+		lb.Shutdown()
 		engine.Close()
 		netMon.Close()
 		return nil, fmt.Errorf("netstack start: %w", err)
@@ -164,7 +172,7 @@ func NewConn(opts *Options) (*Conn, error) {
 		addrs:     opts.Addresses,
 		logger:    opts.Logger,
 		sys:       sys,
-		bus:       bus,
+		lb:        lb,
 		engine:    engine,
 		magicConn: mc,
 		netStack:  ns,
@@ -341,10 +349,10 @@ func (c *Conn) Close() error {
 	c.mu.Unlock()
 
 	_ = c.netStack.Close()
+	c.lb.Shutdown()
 	_ = c.netMon.Close()
 	_ = c.dialer.Close()
 	c.engine.Close()
-	c.bus.Close()
 	return nil
 }
 
