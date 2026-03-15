@@ -118,11 +118,6 @@ func NewConn(opts *Options) (*Conn, error) {
 	sys.Set(new(mem.Store))
 
 	mc := sys.MagicSock.Get()
-	if err := mc.SetPrivateKey(nodePrivKey); err != nil {
-		engine.Close()
-		netMon.Close()
-		return nil, fmt.Errorf("set private key: %w", err)
-	}
 
 	dialer.UseNetstackForIP = func(ip netip.Addr) bool {
 		_, ok := engine.PeerForIP(ip)
@@ -209,7 +204,13 @@ func NewConn(opts *Options) (*Conn, error) {
 		}
 	})
 
-	// Apply initial config.
+	// Set private key before initial Reconfig so magicsock has it
+	// even if LocalBackend's async init hasn't run yet.
+	if err := mc.SetPrivateKey(nodePrivKey); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("set private key: %w", err)
+	}
+
 	c.applyNetworkMap(nil)
 	if opts.DERPMap != nil {
 		mc.SetDERPMap(opts.DERPMap)
@@ -270,8 +271,8 @@ func (c *Conn) applyNetworkMap(peers []*Node) {
 	}
 
 	c.engine.SetNetworkMap(nm)
-	c.netStack.UpdateNetstackIPs(nm) // register local addrs on gvisor NIC
-	if err := c.engine.Reconfig(nmToCfg(nm), &router.Config{LocalAddrs: c.addrs}, &dns.Config{}); err != nil {
+	c.netStack.UpdateNetstackIPs(nm)
+	if err := c.engine.Reconfig(nmToCfg(nm, c.nodeKey), &router.Config{LocalAddrs: c.addrs}, &dns.Config{}); err != nil {
 		c.logger.Warn("reconfig failed", "error", err)
 	}
 }
@@ -379,8 +380,11 @@ func (c *Conn) forwardTCP(src, dst netip.AddrPort) (handler func(net.Conn), inte
 	}, true
 }
 
-func nmToCfg(nm *netmap.NetworkMap) *wgcfg.Config {
-	cfg := &wgcfg.Config{}
+func nmToCfg(nm *netmap.NetworkMap, privateKey key.NodePrivate) *wgcfg.Config {
+	cfg := &wgcfg.Config{
+		PrivateKey: privateKey,
+		Addresses:  nm.SelfNode.Addresses().AsSlice(),
+	}
 	for _, pv := range nm.Peers {
 		pcfg := wgcfg.Peer{
 			PublicKey: pv.Key(),
