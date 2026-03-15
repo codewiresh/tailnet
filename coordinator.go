@@ -52,8 +52,9 @@ func (c *Coordinator) UpdateNode(id uuid.UUID, node *Node) {
 	for src, dst := range c.tunnels {
 		if src == id {
 			// I'm the source (client), notify the destination (agent).
+			// Send ALL client peers so the agent keeps its full peer list.
 			if agent, ok := c.peers[dst]; ok {
-				c.sendUpdate(agent, id, node)
+				c.sendAllPeers(agent, dst)
 			}
 		}
 		if dst == id {
@@ -77,12 +78,13 @@ func (c *Coordinator) AddTunnel(clientID, agentID uuid.UUID) {
 	client := c.peers[clientID]
 	agent := c.peers[agentID]
 
-	// Exchange any existing nodes.
+	// Send agent node to the new client.
 	if client != nil && agent != nil && agent.node != nil {
 		c.sendUpdate(client, agentID, agent.node)
 	}
-	if agent != nil && client != nil && client.node != nil {
-		c.sendUpdate(agent, clientID, client.node)
+	// Send ALL client peers to the agent (not just the new one).
+	if agent != nil {
+		c.sendAllPeers(agent, agentID)
 	}
 }
 
@@ -137,6 +139,27 @@ func (c *Coordinator) Close() error {
 	c.peers = nil
 	c.tunnels = nil
 	return nil
+}
+
+// sendAllPeers sends the full set of client nodes to an agent.
+func (c *Coordinator) sendAllPeers(agent *coordPeer, agentID uuid.UUID) {
+	var nodes []*Node
+	for src, dst := range c.tunnels {
+		if dst == agentID {
+			if client, ok := c.peers[src]; ok && client.node != nil {
+				nodes = append(nodes, client.node)
+			}
+		}
+	}
+	if len(nodes) == 0 {
+		return
+	}
+	select {
+	case agent.respCh <- nodes:
+	default:
+		c.logger.Warn("coordinator: dropped peer update (slow consumer)",
+			"target", agent.id)
+	}
 }
 
 func (c *Coordinator) sendUpdate(target *coordPeer, peerID uuid.UUID, node *Node) {
