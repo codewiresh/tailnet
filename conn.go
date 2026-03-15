@@ -25,6 +25,7 @@ import (
 	"tailscale.com/types/logid"
 	"tailscale.com/types/netmap"
 	"tailscale.com/wgengine"
+	"tailscale.com/wgengine/filter"
 	"tailscale.com/wgengine/magicsock"
 	"tailscale.com/wgengine/netstack"
 	"tailscale.com/wgengine/router"
@@ -147,6 +148,9 @@ func NewConn(opts *Options) (*Conn, error) {
 		return nil, fmt.Errorf("netstack: %w", err)
 	}
 
+	sys.Tun.Get().Start()
+	sys.Tun.Get().SetFilter(filter.NewAllowAllForTest(logf))
+
 	dialer.NetstackDialTCP = func(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 		return ns.DialContextTCP(ctx, dst)
 	}
@@ -203,13 +207,6 @@ func NewConn(opts *Options) (*Conn, error) {
 			cb(c.Node())
 		}
 	})
-
-	// Set private key before initial Reconfig so magicsock has it
-	// even if LocalBackend's async init hasn't run yet.
-	if err := mc.SetPrivateKey(nodePrivKey); err != nil {
-		c.Close()
-		return nil, fmt.Errorf("set private key: %w", err)
-	}
 
 	c.applyNetworkMap(nil)
 	if opts.DERPMap != nil {
@@ -271,6 +268,7 @@ func (c *Conn) applyNetworkMap(peers []*Node) {
 	}
 
 	c.engine.SetNetworkMap(nm)
+	c.magicConn.SetNetworkMap(nm.SelfNode, nm.Peers)
 	c.netStack.UpdateNetstackIPs(nm)
 	if err := c.engine.Reconfig(nmToCfg(nm, c.nodeKey), &router.Config{LocalAddrs: c.addrs}, &dns.Config{}); err != nil {
 		c.logger.Warn("reconfig failed", "error", err)
