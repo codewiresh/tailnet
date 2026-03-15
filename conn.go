@@ -270,6 +270,7 @@ func (c *Conn) applyNetworkMap(peers []*Node) {
 	}
 
 	c.engine.SetNetworkMap(nm)
+	c.netStack.UpdateNetstackIPs(nm) // register local addrs on gvisor NIC
 	if err := c.engine.Reconfig(nmToCfg(nm), &router.Config{LocalAddrs: c.addrs}, &dns.Config{}); err != nil {
 		c.logger.Warn("reconfig failed", "error", err)
 	}
