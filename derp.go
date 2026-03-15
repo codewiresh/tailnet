@@ -80,10 +80,6 @@ func WithWebsocketSupport(s *derpserver.Server, base http.Handler) (http.Handler
 
 // NewDERPMap creates a DERPMap pointing to an embedded DERP server.
 func NewDERPMap(hostname string, port int, insecure bool) *tailcfg.DERPMap {
-	derpPort := 443
-	if insecure {
-		derpPort = port
-	}
 	return &tailcfg.DERPMap{
 		Regions: map[int]*tailcfg.DERPRegion{
 			1: {
@@ -95,7 +91,7 @@ func NewDERPMap(hostname string, port int, insecure bool) *tailcfg.DERPMap {
 						Name:             "1a",
 						RegionID:         1,
 						HostName:         hostname,
-						DERPPort:         derpPort,
+						DERPPort:         port,
 						InsecureForTests: insecure,
 					},
 				},
