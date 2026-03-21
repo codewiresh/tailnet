@@ -67,25 +67,30 @@ func (c *Coordinator) UpdateNode(id uuid.UUID, node *Node) {
 }
 
 // AddTunnel registers a client→agent tunnel and exchanges existing nodes.
-func (c *Coordinator) AddTunnel(clientID, agentID uuid.UUID) {
+// Returns true if the agent's node was delivered to the client immediately
+// (same-replica fast path).
+func (c *Coordinator) AddTunnel(clientID, agentID uuid.UUID) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return
+		return false
 	}
 	c.tunnels[clientID] = agentID
 
 	client := c.peers[clientID]
 	agent := c.peers[agentID]
 
+	delivered := false
 	// Send agent node to the new client.
 	if client != nil && agent != nil && agent.node != nil {
 		c.sendUpdate(client, agentID, agent.node)
+		delivered = true
 	}
 	// Send ALL client peers to the agent (not just the new one).
 	if agent != nil {
 		c.sendAllPeers(agent, agentID)
 	}
+	return delivered
 }
 
 // Register adds a peer. Returns a channel that receives peer updates.
