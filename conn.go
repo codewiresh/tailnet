@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,7 +90,13 @@ func NewConn(opts *Options) (*Conn, error) {
 	nodePrivKey := key.NewNode()
 
 	logf := tslogger.Logf(func(format string, args ...any) {
-		opts.Logger.Debug(fmt.Sprintf(format, args...))
+		msg := fmt.Sprintf(format, args...)
+		if strings.Contains(msg, "erp") || strings.Contains(msg, "DERP") ||
+			strings.Contains(msg, "home now") || strings.Contains(msg, "magicsock") {
+			opts.Logger.Info("[tailscale] " + msg)
+		} else {
+			opts.Logger.Debug("[tailscale] " + msg)
+		}
 	})
 
 	sys := tsd.NewSystem()
