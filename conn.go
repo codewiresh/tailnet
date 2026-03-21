@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"strings"
 	"sync"
 	"time"
 
@@ -90,13 +89,7 @@ func NewConn(opts *Options) (*Conn, error) {
 	nodePrivKey := key.NewNode()
 
 	logf := tslogger.Logf(func(format string, args ...any) {
-		msg := fmt.Sprintf(format, args...)
-		if strings.Contains(msg, "erp") || strings.Contains(msg, "DERP") ||
-			strings.Contains(msg, "home now") || strings.Contains(msg, "magicsock") {
-			opts.Logger.Info("[tailscale] " + msg)
-		} else {
-			opts.Logger.Debug("[tailscale] " + msg)
-		}
+		opts.Logger.Debug(fmt.Sprintf(format, args...))
 	})
 
 	sys := tsd.NewSystem()
@@ -190,10 +183,16 @@ func NewConn(opts *Options) (*Conn, error) {
 	// Track endpoint and DERP changes via magicsock callbacks.
 	mc.SetNetInfoCallback(func(ni *tailcfg.NetInfo) {
 		c.mu.Lock()
+		prevDERP := c.preferredDERP
 		c.preferredDERP = ni.PreferredDERP
 		c.derpLatency = ni.DERPLatency
 		cb := c.nodeCb
 		c.mu.Unlock()
+		opts.Logger.Info("tailnet: netinfo update",
+			"preferred_derp", ni.PreferredDERP,
+			"prev_derp", prevDERP,
+			"derp_latency", ni.DERPLatency,
+		)
 		if cb != nil {
 			cb(c.Node())
 		}
@@ -210,6 +209,7 @@ func NewConn(opts *Options) (*Conn, error) {
 		c.endpoints = eps
 		cb := c.nodeCb
 		c.mu.Unlock()
+		opts.Logger.Info("tailnet: endpoints updated", "count", len(eps), "endpoints", eps)
 		if cb != nil {
 			cb(c.Node())
 		}
@@ -235,6 +235,19 @@ func (c *Conn) SetNodeCallback(cb func(*Node)) {
 
 // SetDERPMap updates the DERP map.
 func (c *Conn) SetDERPMap(dm *tailcfg.DERPMap) {
+	if dm != nil {
+		for id, region := range dm.Regions {
+			for _, node := range region.Nodes {
+				c.logger.Info("tailnet: SetDERPMap",
+					"region_id", id,
+					"node", node.Name,
+					"host", node.HostName,
+					"port", node.DERPPort,
+					"insecure", node.InsecureForTests,
+				)
+			}
+		}
+	}
 	c.magicConn.SetDERPMap(dm)
 }
 

@@ -12,12 +12,14 @@ import (
 	"tailscale.com/derp/derpserver"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
-	tslogger "tailscale.com/types/logger"
 )
 
 // NewDERPServer creates an embedded DERP relay server.
 func NewDERPServer() *derpserver.Server {
-	return derpserver.New(key.NewNode(), tslogger.Discard)
+	logf := func(format string, args ...any) {
+		log.Printf("[derp-server] "+format, args...)
+	}
+	return derpserver.New(key.NewNode(), logf)
 }
 
 // DERPHandler returns an HTTP handler for the DERP server with WebSocket support.
@@ -57,7 +59,7 @@ func WithWebsocketSupport(s *derpserver.Server, base http.Handler) (http.Handler
 				CompressionMode: websocket.CompressionDisabled,
 			})
 			if err != nil {
-				log.Printf("derp websocket accept: %v", err)
+				log.Printf("derp websocket accept error: remote=%s err=%v", r.RemoteAddr, err)
 				return
 			}
 			defer c.Close(websocket.StatusInternalError, "closing")
@@ -67,9 +69,11 @@ func WithWebsocketSupport(s *derpserver.Server, base http.Handler) (http.Handler
 				return
 			}
 
+			log.Printf("derp websocket accepted: remote=%s subproto=%s", r.RemoteAddr, c.Subprotocol())
 			wc := websocket.NetConn(ctx, c, websocket.MessageBinary)
 			brw := bufio.NewReadWriter(bufio.NewReader(wc), bufio.NewWriter(wc))
 			s.Accept(ctx, wc, brw, r.RemoteAddr)
+			log.Printf("derp session ended: remote=%s", r.RemoteAddr)
 		}), func() {
 			cancel()
 			mu.Lock()
