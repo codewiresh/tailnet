@@ -189,7 +189,7 @@ func NewConn(opts *Options) (*Conn, error) {
 		c.derpLatency = ni.DERPLatency
 		cb := c.nodeCb
 		c.mu.Unlock()
-		opts.Logger.Info("tailnet: netinfo update",
+		opts.Logger.Debug("tailnet: netinfo update",
 			"preferred_derp", ni.PreferredDERP,
 			"prev_derp", prevDERP,
 			"derp_latency", ni.DERPLatency,
@@ -210,7 +210,7 @@ func NewConn(opts *Options) (*Conn, error) {
 		c.endpoints = eps
 		cb := c.nodeCb
 		c.mu.Unlock()
-		opts.Logger.Info("tailnet: endpoints updated", "count", len(eps), "endpoints", eps)
+		opts.Logger.Debug("tailnet: endpoints updated", "count", len(eps), "endpoints", eps)
 		if cb != nil {
 			cb(c.Node())
 		}
@@ -241,7 +241,7 @@ func (c *Conn) SetDERPMap(dm *tailcfg.DERPMap) {
 	if dm != nil {
 		for id, region := range dm.Regions {
 			for _, node := range region.Nodes {
-				c.logger.Info("tailnet: SetDERPMap",
+				c.logger.Debug("tailnet: SetDERPMap",
 					"region_id", id,
 					"node", node.Name,
 					"host", node.HostName,
