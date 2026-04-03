@@ -3,11 +3,8 @@ package tailnet
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -85,20 +82,12 @@ func WithWebsocketSupport(s *derpserver.Server, base http.Handler) (http.Handler
 		}
 }
 
-// DefaultSTUNServers are public STUN servers used for NAT traversal.
-// These enable direct WireGuard peering by letting peers discover their
-// public IP:port. The servers only see a single UDP probe packet per
-// connection attempt; they never relay actual traffic.
-var DefaultSTUNServers = []string{
-	"stun.l.google.com:19302",
-	"stun1.l.google.com:19302",
-	"stun2.l.google.com:19302",
-	"stun3.l.google.com:19302",
-}
-
-// NewDERPMap creates a DERPMap pointing to an embedded DERP server.
+// NewDERPMap creates a relay-only DERPMap. STUN is disabled on the relay
+// node (STUNPort=-1) to prevent STUN latency from competing with the
+// DERP relay for preferred_derp selection. Use WithSTUNNode to add a
+// co-located STUN node in the same region.
 func NewDERPMap(hostname string, port int, insecure bool) *tailcfg.DERPMap {
-	dm := &tailcfg.DERPMap{
+	return &tailcfg.DERPMap{
 		Regions: map[int]*tailcfg.DERPRegion{
 			1: {
 				RegionID:   1,
@@ -110,34 +99,29 @@ func NewDERPMap(hostname string, port int, insecure bool) *tailcfg.DERPMap {
 						RegionID:         1,
 						HostName:         hostname,
 						DERPPort:         port,
+						STUNPort:         -1,
 						InsecureForTests: insecure,
 					},
 				},
 			},
 		},
 	}
-	for i, addr := range DefaultSTUNServers {
-		host, rawPort, err := net.SplitHostPort(addr)
-		if err != nil {
-			continue
-		}
-		stunPort, err := strconv.Atoi(rawPort)
-		if err != nil {
-			continue
-		}
-		regionID := 9000 + i + 1
-		dm.Regions[regionID] = &tailcfg.DERPRegion{
-			RegionID:   regionID,
-			RegionCode: fmt.Sprintf("stun%d", i+1),
-			RegionName: fmt.Sprintf("STUN %d", i+1),
-			Nodes: []*tailcfg.DERPNode{{
-				Name:     fmt.Sprintf("%dstun", regionID),
-				RegionID: regionID,
-				HostName: host,
-				STUNOnly: true,
-				STUNPort: stunPort,
-			}},
-		}
+}
+
+// WithSTUNNode adds a STUNOnly node to region 1. This keeps STUN and
+// DERP in the same region so preferred_derp always stays on the relay.
+// The STUN node can be on a different host (e.g. a NodePort IP) from
+// the DERP relay (e.g. behind a TCP LB).
+func WithSTUNNode(dm *tailcfg.DERPMap, stunHost string, stunPort int) {
+	region := dm.Regions[1]
+	if region == nil {
+		return
 	}
-	return dm
+	region.Nodes = append(region.Nodes, &tailcfg.DERPNode{
+		Name:     "1s",
+		RegionID: 1,
+		HostName: stunHost,
+		STUNOnly: true,
+		STUNPort: stunPort,
+	})
 }
