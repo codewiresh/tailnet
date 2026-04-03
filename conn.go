@@ -70,6 +70,7 @@ type Conn struct {
 	endpoints     []netip.AddrPort
 	derpLatency   map[string]float64
 	nodeCb        func(*Node)
+	derpMap       *tailcfg.DERPMap
 }
 
 // NodeID creates a tailcfg.NodeID from a UUID.
@@ -215,10 +216,11 @@ func NewConn(opts *Options) (*Conn, error) {
 		}
 	})
 
-	c.applyNetworkMap(nil)
 	if opts.DERPMap != nil {
+		c.derpMap = opts.DERPMap
 		mc.SetDERPMap(opts.DERPMap)
 	}
+	c.applyNetworkMap(nil)
 
 	return c, nil
 }
@@ -233,7 +235,8 @@ func (c *Conn) SetNodeCallback(cb func(*Node)) {
 	}
 }
 
-// SetDERPMap updates the DERP map.
+// SetDERPMap updates the DERP map and re-applies the NetworkMap so that
+// magicsock's netcheck can discover public endpoints via STUN.
 func (c *Conn) SetDERPMap(dm *tailcfg.DERPMap) {
 	if dm != nil {
 		for id, region := range dm.Regions {
@@ -242,13 +245,19 @@ func (c *Conn) SetDERPMap(dm *tailcfg.DERPMap) {
 					"region_id", id,
 					"node", node.Name,
 					"host", node.HostName,
-					"port", node.DERPPort,
+					"derp_port", node.DERPPort,
+					"stun_port", node.STUNPort,
+					"stun_only", node.STUNOnly,
 					"insecure", node.InsecureForTests,
 				)
 			}
 		}
 	}
+	c.mu.Lock()
+	c.derpMap = dm
+	c.mu.Unlock()
 	c.magicConn.SetDERPMap(dm)
+	c.magicConn.ReSTUN("derpmap-update")
 }
 
 // UpdatePeers configures the WireGuard engine with the given peer nodes.
@@ -272,6 +281,7 @@ func (c *Conn) applyNetworkMap(peers []*Node) {
 			Addresses: c.addrs,
 		}).View(),
 		NodeKey: c.nodeKey.Public(),
+		DERPMap: c.derpMap,
 	}
 
 	for _, p := range peers {
