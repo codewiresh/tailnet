@@ -110,7 +110,6 @@ func NewDERPMap(hostname string, port int, insecure bool) *tailcfg.DERPMap {
 						RegionID:         1,
 						HostName:         hostname,
 						DERPPort:         port,
-						STUNPort:         -1,
 						InsecureForTests: insecure,
 					},
 				},
